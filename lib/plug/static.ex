@@ -70,7 +70,7 @@ defmodule Plug.Static do
       `"public, max-age=31536000"`.
 
     * `:only` - filters which requests to serve. This is useful to avoid
-      file system traversals on every request when this plug is mounted
+      file system access on every request when this plug is mounted
       at `"/"`. For example, if `only: ["images", "favicon.ico"]` is
       specified, only files in the "images" directory and the
       "favicon.ico" file will be served by `Plug.Static`.
@@ -136,6 +136,7 @@ defmodule Plug.Static do
     defexception message: "invalid path for static asset", plug_status: 400
   end
 
+  @impl true
   def init(opts) do
     from =
       case Keyword.fetch!(opts, :from) do
@@ -159,6 +160,7 @@ defmodule Plug.Static do
     }
   end
 
+  @impl true
   def call(
         conn = %Conn{method: meth},
         %{at: at, only_rules: only_rules, from: from, gzip?: gzip?, brotli?: brotli?} = options
