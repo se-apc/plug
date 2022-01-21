@@ -59,11 +59,6 @@ defmodule Plug.Conn do
       are expected to have lowercase keys.
     * `status` - the response status
 
-  Furthermore, the `before_send` field stores callbacks that are invoked
-  before the connection is sent. Callbacks are invoked in the reverse order
-  they are registered (callbacks registered first are invoked last) in order
-  to reproduce a pipeline ordering.
-
   ## Connection fields
 
     * `assigns` - shared user data as a map
@@ -124,7 +119,6 @@ defmodule Plug.Conn do
 
   @type adapter :: {module, term}
   @type assigns :: %{optional(atom) => any}
-  @type before_send :: [(t -> t)]
   @type body :: iodata
   @type req_cookies :: %{optional(binary) => binary}
   @type cookies :: %{optional(binary) => term}
@@ -139,7 +133,7 @@ defmodule Plug.Conn do
   @type params :: %{optional(binary) => term}
   @type port_number :: :inet.port_number()
   @type query_string :: String.t()
-  @type resp_cookies :: %{optional(binary) => %{}}
+  @type resp_cookies :: %{optional(binary) => map()}
   @type scheme :: :http | :https
   @type secret_key_base :: binary | nil
   @type segments :: [binary]
@@ -149,7 +143,6 @@ defmodule Plug.Conn do
   @type t :: %__MODULE__{
           adapter: adapter,
           assigns: assigns,
-          before_send: before_send,
           body_params: params | Unfetched.t(),
           cookies: cookies | Unfetched.t(),
           halted: halted,
@@ -179,7 +172,6 @@ defmodule Plug.Conn do
 
   defstruct adapter: {Plug.MissingAdapter, nil},
             assigns: %{},
-            before_send: [],
             body_params: %Unfetched{aspect: :body_params},
             cookies: %Unfetched{aspect: :cookies},
             halted: false,
@@ -437,7 +429,7 @@ defmodule Plug.Conn do
   def send_file(conn, status, file, offset \\ 0, length \\ :all)
 
   def send_file(%Conn{state: state}, status, _file, _offset, _length)
-      when not (state in @unsent) do
+      when state not in @unsent do
     _ = Plug.Conn.Status.code(status)
     raise AlreadySentError
   end
@@ -479,7 +471,7 @@ defmodule Plug.Conn do
   """
   @spec send_chunked(t, status) :: t | no_return
   def send_chunked(%Conn{state: state}, status)
-      when not (state in @unsent) do
+      when state not in @unsent do
     _ = Plug.Conn.Status.code(status)
     raise AlreadySentError
   end
@@ -578,7 +570,7 @@ defmodule Plug.Conn do
   """
   @spec resp(t, status, body) :: t
   def resp(%Conn{state: state}, status, _body)
-      when not (state in @unsent) do
+      when state not in @unsent do
     _ = Plug.Conn.Status.code(status)
     raise AlreadySentError
   end
@@ -969,6 +961,9 @@ defmodule Plug.Conn do
   ## Options
 
     * `:length` - the maximum query string length. Defaults to `1_000_000` bytes.
+      Keep in mind the webserver you are using may have a more strict limit. For
+      example, for the Cowboy webserver, [please read](https://hexdocs.pm/plug_cowboy/Plug.Cowboy.html#module-safety-limits).
+
     * `:validate_utf8` - boolean that tells whether or not to validate the keys and
       values of the decoded query string are UTF-8 encoded. Defaults to `true`.
 
@@ -1257,7 +1252,7 @@ defmodule Plug.Conn do
   end
 
   defp adapter_inform(%Conn{state: state}, _status, _headers)
-       when not (state in @unsent) do
+       when state not in @unsent do
     raise AlreadySentError
   end
 
@@ -1301,7 +1296,7 @@ defmodule Plug.Conn do
   end
 
   defp adapter_push(%Conn{state: state}, _path, _headers)
-       when not (state in @unsent) do
+       when state not in @unsent do
     raise AlreadySentError
   end
 
@@ -1536,7 +1531,7 @@ defmodule Plug.Conn do
   on unsent `conn`s. Will raise otherwise.
   """
   @spec put_session(t, String.t() | atom, any) :: t
-  def put_session(%Conn{state: state}, _key, _value) when not (state in @unsent),
+  def put_session(%Conn{state: state}, _key, _value) when state not in @unsent,
     do: raise(AlreadySentError)
 
   def put_session(conn, key, value) when is_atom(key) or is_binary(key) do
@@ -1580,7 +1575,7 @@ defmodule Plug.Conn do
   automatically converted to strings.
   """
   @spec delete_session(t, String.t() | atom) :: t
-  def delete_session(%Conn{state: state}, _key) when not (state in @unsent),
+  def delete_session(%Conn{state: state}, _key) when state not in @unsent,
     do: raise(AlreadySentError)
 
   def delete_session(conn, key) when is_atom(key) or is_binary(key) do
@@ -1606,16 +1601,20 @@ defmodule Plug.Conn do
 
   ## Options
 
-    * `:renew` - generates a new session id for the cookie
-    * `:drop` - drops the session, a session cookie will not be included in the
+    * `:renew` - When `true`, generates a new session id for the cookie
+    * `:drop` - When `true`, drops the session, a session cookie will not be included in the
       response
-    * `:ignore` - ignores all changes made to the session in this request cycle
+    * `:ignore` - When `true`, ignores all changes made to the session in this request cycle
+
+  ## Examples
+
+      configure_session(conn, renew: true)
 
   """
   @spec configure_session(t, Keyword.t()) :: t
   def configure_session(conn, opts)
 
-  def configure_session(%Conn{state: state}, _opts) when not (state in @unsent),
+  def configure_session(%Conn{state: state}, _opts) when state not in @unsent,
     do: raise(AlreadySentError)
 
   def configure_session(conn, opts) do
@@ -1652,13 +1651,13 @@ defmodule Plug.Conn do
   def register_before_send(conn, callback)
 
   def register_before_send(%Conn{state: state}, _callback)
-      when not (state in @unsent) do
+      when state not in @unsent do
     raise AlreadySentError
   end
 
-  def register_before_send(%Conn{before_send: before_send} = conn, callback)
+  def register_before_send(%Conn{} = conn, callback)
       when is_function(callback, 1) do
-    %{conn | before_send: [callback | before_send]}
+    update_in(conn.private[:before_send], &[callback | &1 || []])
   end
 
   @doc """
@@ -1687,8 +1686,8 @@ defmodule Plug.Conn do
 
   ## Helpers
 
-  defp run_before_send(%Conn{before_send: before_send} = conn, new) do
-    conn = Enum.reduce(before_send, %{conn | state: new}, & &1.(&2))
+  defp run_before_send(%Conn{private: private} = conn, new) do
+    conn = Enum.reduce(private[:before_send] || [], %{conn | state: new}, & &1.(&2))
 
     if conn.state != new do
       raise ArgumentError, "cannot send/change response from run_before_send callback"

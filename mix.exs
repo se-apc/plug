@@ -1,7 +1,7 @@
 defmodule Plug.MixProject do
   use Mix.Project
 
-  @version "1.11.0"
+  @version "1.12.1"
   @description "A specification and conveniences for composable modules between web applications"
   @xref_exclude [Plug.Cowboy, :telemetry]
 
@@ -41,9 +41,9 @@ defmodule Plug.MixProject do
 
   def deps do
     [
-      {:mime, "~> 1.0"},
+      {:mime, "~> 1.0 or ~> 2.0"},
       {:plug_crypto, "~> 1.1.1 or ~> 1.2"},
-      {:telemetry, "~> 0.4"},
+      {:telemetry, "~> 0.4.3 or ~> 1.0"},
       {:ex_doc, "~> 0.21", only: :docs}
     ]
   end
@@ -63,9 +63,6 @@ defmodule Plug.MixProject do
     # Plug
     # Plug.Builder
     # Plug.Conn
-    # Plug.Debugger
-    # Plug.ErrorHandler
-    # Plug.Exception
     # Plug.HTML
     # Plug.Router
     # Plug.Test
@@ -73,17 +70,23 @@ defmodule Plug.MixProject do
 
     [
       Plugs: [
+        Plug.BasicAuth,
         Plug.CSRFProtection,
         Plug.Head,
         Plug.Logger,
         Plug.MethodOverride,
         Plug.Parsers,
         Plug.RequestId,
-        Plug.BasicAuth,
+        Plug.RewriteOn,
         Plug.SSL,
         Plug.Session,
         Plug.Static,
         Plug.Telemetry
+      ],
+      "Error handling": [
+        Plug.Debugger,
+        Plug.ErrorHandler,
+        Plug.Exception
       ],
       "Plug.Conn": [
         Plug.Conn.Adapter,
