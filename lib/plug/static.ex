@@ -10,9 +10,9 @@ defmodule Plug.Static do
     * `:from` - the file system path to read static assets from.
       It can be either: a string containing a file system path, an
       atom representing the application name (where assets will
-      be served from `priv/static`), or a tuple containing the
+      be served from `priv/static`), a tuple containing the
       application name and the directory to serve assets from (besides
-      `priv/static`).
+      `priv/static`), or an MFA tuple.
 
   The preferred form is to use `:from` with an atom or tuple, since
   it will make your application independent from the starting directory.
@@ -141,6 +141,7 @@ defmodule Plug.Static do
     from =
       case Keyword.fetch!(opts, :from) do
         {_, _} = from -> from
+        {_, _, _} = from -> from
         from when is_atom(from) -> {from, "priv/static"}
         from when is_binary(from) -> from
         _ -> raise ArgumentError, ":from must be an atom, a binary or a tuple"
@@ -189,6 +190,7 @@ defmodule Plug.Static do
   end
 
   defp uri_decode(path) do
+    # TODO: Remove rescue as this can't fail from Elixir v1.13
     try do
       URI.decode(path)
     rescue
@@ -391,10 +393,15 @@ defmodule Plug.Static do
     end)
   end
 
-  defp path({app, from}, segments) when is_atom(app) and is_binary(from),
-    do: Path.join([Application.app_dir(app), from | segments])
+  defp path({module, function, arguments}, segments)
+       when is_atom(module) and is_atom(function) and is_list(arguments),
+       do: Enum.join([apply(module, function, arguments) | segments], "/")
 
-  defp path(from, segments), do: Path.join([from | segments])
+  defp path({app, from}, segments) when is_atom(app) and is_binary(from),
+    do: Enum.join([Application.app_dir(app), from | segments], "/")
+
+  defp path(from, segments),
+    do: Enum.join([from | segments], "/")
 
   defp subset([h | expected], [h | actual]), do: subset(expected, actual)
   defp subset([], actual), do: actual

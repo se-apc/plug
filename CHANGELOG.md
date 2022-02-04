@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.12.1 (2021-08-01)
+
+### Bug fixes
+
+  * [Plug] Make sure module plugs are compile time dependencies if init mode is compile-time
+
+## v1.12.0 (2021-07-22)
+
+### Enhancements
+
+  * [Plug] Accept mime v2.0
+  * [Plug] Accept telemetry v1.0
+  * [Plug.Conn] Improve performance of UTF-8 validation
+  * [Plug.Conn.Adapter] Add API for creating a connection
+  * [Plug.Static] Allow MFA in `:from`
+
+## v1.11.1 (2021-03-08)
+
+### Enhancements
+
+  * [Plug.Upload] Allow transfer of ownership in Plug.Upload
+
+### Bug fixes
+
+  * [Plug.Debugger] Drop CSP Header when showing error via Plug.Debugger
+  * [Plug.Test] Populate `query_params` from `Plug.Test.conn/3`
+
 ## v1.11.0 (2020-10-29)
 
 ### Enhancements
