@@ -122,6 +122,7 @@ defmodule Plug.Static do
 
   import Plug.Conn
   alias Plug.Conn
+  require Logger
 
   # In this module, the `:prim_file` Erlang module along with the `:file_info`
   # record are used instead of the more common and Elixir-y `File` module and
@@ -173,7 +174,7 @@ defmodule Plug.Static do
       segments = Enum.map(segments, &uri_decode/1)
 
       if invalid_path?(segments) do
-        raise InvalidPathError
+        Logger.error("Got invalid path: #{inspect(segments)}")
       end
 
       path = path(from, segments)
