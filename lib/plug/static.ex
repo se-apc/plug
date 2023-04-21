@@ -175,6 +175,7 @@ defmodule Plug.Static do
 
       if invalid_path?(segments) do
         Logger.error("Got invalid path: #{inspect(segments)}")
+        raise InvalidPathError, "invalid path for static asset: #{conn.request_path}"
       end
 
       path = path(from, segments)
