@@ -175,12 +175,13 @@ defmodule Plug.Static do
 
       if invalid_path?(segments) do
         Logger.error("Got invalid path: #{inspect(segments)}")
+        conn
+      else
+        path = path(from, segments)
+        range = get_req_header(conn, "range")
+        encoding = file_encoding(conn, path, range, gzip?, brotli?)
+        serve_static(encoding, conn, segments, range, options)
       end
-
-      path = path(from, segments)
-      range = get_req_header(conn, "range")
-      encoding = file_encoding(conn, path, range, gzip?, brotli?)
-      serve_static(encoding, conn, segments, range, options)
     else
       conn
     end
