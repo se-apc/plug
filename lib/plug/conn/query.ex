@@ -58,6 +58,8 @@ defmodule Plug.Conn.Query do
 
   """
 
+  require Logger
+
   @doc """
   Decodes the given binary.
 
@@ -109,7 +111,8 @@ defmodule Plug.Conn.Query do
       URI.decode_www_form(value)
     rescue
       ArgumentError ->
-        raise invalid_exception, "invalid urlencoded params, got #{value}"
+        Logger.error("Exception! invalid urlencoded params, got #{inspect value}")
+        ""
     else
       binary ->
         if validate_utf8 do
