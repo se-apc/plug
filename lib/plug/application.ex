@@ -8,6 +8,7 @@ defmodule Plug.Application do
     Plug.Keys = :ets.new(Plug.Keys, [:named_table, :public, read_concurrency: true])
 
     children = [
+      Plug.Upload.EventDispatcher,
       Plug.Upload
     ]
 

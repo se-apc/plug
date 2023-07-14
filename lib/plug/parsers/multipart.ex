@@ -62,6 +62,7 @@ defmodule Plug.Parsers.MULTIPART do
   """
 
   @behaviour Plug.Parsers
+  require Logger
 
   @impl true
   def init(opts) do
@@ -158,13 +159,25 @@ defmodule Plug.Parsers.MULTIPART do
         {conn, limit, [{name, %{headers: headers, body: body}} | acc]}
 
       {:file, name, path, %Plug.Upload{} = uploaded} ->
-        {:ok, file} = File.open(path, [:write, :binary, :delayed_write, :raw])
+        filename = Map.get(uploaded, :filename)
+        upload_meta_data = %{filename: filename, path: path, conn: conn}
+        case File.open(path, [:write, :binary, :delayed_write, :raw]) do
+          {:ok, file} ->
+            Plug.Upload.EventDispatcher.dispatch({:plug_upload_started, upload_meta_data})
+            {:ok, limit, conn} =
+              parse_multipart_file(Plug.Conn.read_part_body(conn, opts), limit, opts, file, upload_meta_data)
 
-        {:ok, limit, conn} =
-          parse_multipart_file(Plug.Conn.read_part_body(conn, opts), limit, opts, file)
-
-        :ok = File.close(file)
-        {conn, limit, [{name, uploaded} | acc]}
+            case File.close(file) do
+              :ok ->
+                :ok
+              {:error, reason} ->
+                Logger.error("Failed to close #{inspect(file)}. Reason: #{inspect(reason)}")
+            end
+            {conn, limit, [{name, uploaded} | acc]}
+          {:error, reason} ->
+            Plug.Upload.EventDispatcher.dispatch(:plug_upload_failed, upload_meta_data)
+            Logger.error("Failed to open #{inspect(path)}. Reason: #{inspect(reason)}")
+        end
 
       :skip ->
         {conn, limit, acc}
@@ -190,35 +203,38 @@ defmodule Plug.Parsers.MULTIPART do
     {:ok, limit - byte_size(tail), body, conn}
   end
 
-  defp parse_multipart_file({:more, tail, conn}, limit, opts, file)
+  defp parse_multipart_file({:more, tail, conn}, limit, opts, file, upload_meta_data)
        when limit >= byte_size(tail) do
-    binwrite!(file, tail)
+    binwrite!(file, tail, upload_meta_data)
     read_result = Plug.Conn.read_part_body(conn, opts)
-    parse_multipart_file(read_result, limit - byte_size(tail), opts, file)
+    parse_multipart_file(read_result, limit - byte_size(tail), opts, file, upload_meta_data)
   end
 
-  defp parse_multipart_file({:more, tail, conn}, limit, _opts, _file) do
+  defp parse_multipart_file({:more, tail, conn}, limit, _opts, _file, _upload_meta_data) do
     {:ok, limit - byte_size(tail), conn}
   end
 
-  defp parse_multipart_file({:ok, tail, conn}, limit, _opts, file)
+  defp parse_multipart_file({:ok, tail, conn}, limit, _opts, file, upload_meta_data)
        when limit >= byte_size(tail) do
-    binwrite!(file, tail)
+    binwrite!(file, tail, upload_meta_data)
+    Plug.Upload.EventDispatcher.dispatch(:plug_upload_successful, upload_meta_data)
     {:ok, limit - byte_size(tail), conn}
   end
 
-  defp parse_multipart_file({:ok, tail, conn}, limit, _opts, _file) do
+  defp parse_multipart_file({:ok, tail, conn}, limit, _opts, _file, upload_meta_data) do
+    Plug.Upload.EventDispatcher.dispatch(:plug_upload_successful, upload_meta_data)
     {:ok, limit - byte_size(tail), conn}
   end
 
   ## Helpers
 
-  defp binwrite!(device, contents) do
+  defp binwrite!(device, contents, upload_meta_data) do
     case IO.binwrite(device, contents) do
       :ok ->
         :ok
 
       {:error, reason} ->
+        Plug.Upload.EventDispatcher.dispatch(:plug_upload_failed, upload_meta_data)
         raise Plug.UploadError,
               "could not write to file #{inspect(device)} during upload " <>
                 "due to reason: #{inspect(reason)}"
