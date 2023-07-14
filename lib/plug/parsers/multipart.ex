@@ -163,7 +163,7 @@ defmodule Plug.Parsers.MULTIPART do
         upload_meta_data = %{filename: filename, path: path, conn: conn}
         case File.open(path, [:write, :binary, :delayed_write, :raw]) do
           {:ok, file} ->
-            Plug.Upload.EventDispatcher.dispatch({:plug_upload_started, upload_meta_data})
+            Plug.Upload.EventDispatcher.dispatch(:plug_upload_started, upload_meta_data)
             {:ok, limit, conn} =
               parse_multipart_file(Plug.Conn.read_part_body(conn, opts), limit, opts, file, upload_meta_data)
 

@@ -5,6 +5,17 @@ defmodule Plug.Upload.EventDispatcher do
   :plug_upload_started
   :plug_upload_successful
   :plug_upload_failed
+
+  They will be dispatched in a tuple of the format {:plug_upload_status, {event, upload_meta_data}}
+
+  These events can then be received with handlers, like this:
+
+    def handle_info({:plug_upload_status, {:plug_upload_started, %{conn: %Plug.Conn{request_path: "/some_path"}, filename: file}}}, state) do
+      .
+      .
+      .
+      {:noreply, state}
+    end
   """
   @server_name __MODULE__
   require Logger
