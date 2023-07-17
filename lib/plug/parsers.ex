@@ -346,6 +346,11 @@ defmodule Plug.Parsers do
 
       {:error, :too_large, _conn} ->
         raise RequestTooLargeError
+
+      ## Don't throw a generic error, simply pass the conn through to the Phoenix Controller
+      ## where it can be handled by pattern-matching on the parse_errors key
+      {:error, errors, conn} ->
+        conn |> Map.put(:params, %{parse_errors: errors})
     end
   end
 
