@@ -5,10 +5,17 @@ defmodule Plug.SSLTest do
   describe "configure" do
     import Plug.SSL, only: [configure: 1]
 
-    test "sets secure_renegotiate and reuse_sessions to true by default" do
-      assert {:ok, opts} = configure(key: "abcdef", cert: "ghijkl")
+    test "sets secure_renegotiate and reuse_sessions to true depending on the version" do
+      assert {:ok, opts} = configure(key: "abcdef", cert: "ghijkl", versions: [:tlsv1])
       assert opts[:reuse_sessions] == true
       assert opts[:secure_renegotiate] == true
+      assert opts[:honor_cipher_order] == nil
+      assert opts[:client_renegotiation] == nil
+      assert opts[:cipher_suite] == nil
+
+      assert {:ok, opts} = configure(key: "abcdef", cert: "ghijkl", versions: [:"tlsv1.3"])
+      assert opts[:reuse_sessions] == nil
+      assert opts[:secure_renegotiate] == nil
       assert opts[:honor_cipher_order] == nil
       assert opts[:client_renegotiation] == nil
       assert opts[:cipher_suite] == nil
@@ -25,12 +32,12 @@ defmodule Plug.SSLTest do
       assert opts[:versions] == [:"tlsv1.2"]
 
       assert opts[:ciphers] == [
-               'ECDHE-RSA-AES256-GCM-SHA384',
-               'ECDHE-ECDSA-AES256-GCM-SHA384',
-               'ECDHE-RSA-AES128-GCM-SHA256',
-               'ECDHE-ECDSA-AES128-GCM-SHA256',
-               'DHE-RSA-AES256-GCM-SHA384',
-               'DHE-RSA-AES128-GCM-SHA256'
+               ~c"ECDHE-RSA-AES256-GCM-SHA384",
+               ~c"ECDHE-ECDSA-AES256-GCM-SHA384",
+               ~c"ECDHE-RSA-AES128-GCM-SHA256",
+               ~c"ECDHE-ECDSA-AES128-GCM-SHA256",
+               ~c"DHE-RSA-AES256-GCM-SHA384",
+               ~c"DHE-RSA-AES128-GCM-SHA256"
              ]
     end
 
@@ -42,22 +49,22 @@ defmodule Plug.SSLTest do
       assert opts[:versions] == [:"tlsv1.2", :"tlsv1.1", :tlsv1]
 
       assert opts[:ciphers] == [
-               'ECDHE-RSA-AES256-GCM-SHA384',
-               'ECDHE-ECDSA-AES256-GCM-SHA384',
-               'ECDHE-RSA-AES128-GCM-SHA256',
-               'ECDHE-ECDSA-AES128-GCM-SHA256',
-               'DHE-RSA-AES256-GCM-SHA384',
-               'DHE-RSA-AES128-GCM-SHA256',
-               'ECDHE-RSA-AES256-SHA384',
-               'ECDHE-ECDSA-AES256-SHA384',
-               'ECDHE-RSA-AES128-SHA256',
-               'ECDHE-ECDSA-AES128-SHA256',
-               'DHE-RSA-AES256-SHA256',
-               'DHE-RSA-AES128-SHA256',
-               'ECDHE-RSA-AES256-SHA',
-               'ECDHE-ECDSA-AES256-SHA',
-               'ECDHE-RSA-AES128-SHA',
-               'ECDHE-ECDSA-AES128-SHA'
+               ~c"ECDHE-RSA-AES256-GCM-SHA384",
+               ~c"ECDHE-ECDSA-AES256-GCM-SHA384",
+               ~c"ECDHE-RSA-AES128-GCM-SHA256",
+               ~c"ECDHE-ECDSA-AES128-GCM-SHA256",
+               ~c"DHE-RSA-AES256-GCM-SHA384",
+               ~c"DHE-RSA-AES128-GCM-SHA256",
+               ~c"ECDHE-RSA-AES256-SHA384",
+               ~c"ECDHE-ECDSA-AES256-SHA384",
+               ~c"ECDHE-RSA-AES128-SHA256",
+               ~c"ECDHE-ECDSA-AES128-SHA256",
+               ~c"DHE-RSA-AES256-SHA256",
+               ~c"DHE-RSA-AES128-SHA256",
+               ~c"ECDHE-RSA-AES256-SHA",
+               ~c"ECDHE-ECDSA-AES256-SHA",
+               ~c"ECDHE-RSA-AES128-SHA",
+               ~c"ECDHE-ECDSA-AES128-SHA"
              ]
     end
 
@@ -82,6 +89,13 @@ defmodule Plug.SSLTest do
       assert opts[:ciphers] == []
     end
 
+    test "allows bare atom configuration through unchanged" do
+      assert {:ok, opts} = configure([:inet6, {:key, "abcdef"}, {:cert, "ghijkl"}])
+      assert :inet6 in opts
+      assert {:key, "abcdef"} in opts
+      assert {:cert, "ghijkl"} in opts
+    end
+
     test "errors when an invalid cipher is given" do
       assert configure(key: "abcdef", cert: "ghijkl", cipher_suite: :unknown) ==
                {:error, "unknown :cipher_suite named :unknown"}
@@ -92,7 +106,7 @@ defmodule Plug.SSLTest do
                configure(
                  key: "abcdef",
                  cert: "ghijkl",
-                 ciphers: ['ECDHE-ECDSA-AES256-GCM-SHA384', "ECDHE-RSA-AES256-GCM-SHA384"]
+                 ciphers: [~c"ECDHE-ECDSA-AES256-GCM-SHA384", "ECDHE-RSA-AES256-GCM-SHA384"]
                )
 
       assert message ==

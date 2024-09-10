@@ -1,4 +1,9 @@
-use Mix.Config
+import Config
+
+config :logger, :console,
+  format: "$time $metadata[$level] $message\n",
+  colors: [enabled: false],
+  metadata: [:request_id]
 
 if Mix.env() == :test do
   config :plug, :statuses, %{

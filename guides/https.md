@@ -51,7 +51,7 @@ The `cacertfile` option is not needed when using a self-signed certificate, or w
   keyfile: "/etc/letsencrypt/live/example.net/privkey.pem"
 ```
 
-It is possible to bundle the certificate files with the  application, possibly for packaging into a release. In this case the files must be stored under the application's 'priv' directory. The `otp_app` option must be set to the name of the OTP application that contains the files, in order to correctly resolve the relative paths:
+It is possible to bundle the certificate files with the application, possibly for packaging into a release. In this case the files must be stored under the application's 'priv' directory. The `otp_app` option must be set to the name of the OTP application that contains the files, in order to correctly resolve the relative paths:
 
 ```elixir
 Plug.Cowboy.https MyApp.MyPlug, [],
@@ -209,7 +209,7 @@ This is not intended to be an exhaustive list, as this topic is actually a bit b
 
 ## Offloading TLS
 
-So far this document has focussed on configuring Plug to handle TLS within the application. Some people instead prefer to terminate TLS in a proxy or load balancer deployed in front of the Plug application.
+So far this document has focused on configuring Plug to handle TLS within the application. Some people instead prefer to terminate TLS in a proxy or load balancer deployed in front of the Plug application.
 
 ### Pros and Cons
 
@@ -223,7 +223,7 @@ When using TLS offloading it may be necessary to make some configuration changes
 
 `Plug.SSL` takes on another important role when using TLS offloading: it can update the `:scheme` and `:port` fields in the `Plug.Conn` struct based on an HTTP header (e.g. 'X-Forwarded-Proto'), to reflect the actual protocol used by the client (HTTP or HTTPS). It is very important that the `:scheme` field properly reflects the use of HTTPS, even if the connection between the proxy and the application uses plain HTTP, because cookies set by `Plug.Session` and `Plug.Conn.put_resp_cookie/4` by default set the 'secure' cookie flag only if `:scheme` is set to `:https`! When relying on this default behaviour it is essential that `Plug.SSL` is included in the Plug pipeline, that its `:rewrite_on` option is set correctly, and that the proxy sets the appropriate header.
 
-The `:remote_ip` field in the `Plug.Conn` struct by default contains the network peer IP address. Terminating TLS in a separate process or network element typically masks the actual client IP address from the Elixir application. If proxying is done at the HTTP layer, the original client IP address is often inserted into an HTTP header, e.g. 'X-Forwarded-For'. There are Plug packages available to extract the client IP from such a header and update the `:remote_ip` field.
+The `:remote_ip` field in the `Plug.Conn` struct by default contains the network peer IP address. Terminating TLS in a separate process or network element typically masks the actual client IP address from the Elixir application. If proxying is done at the HTTP layer, the original client IP address is often inserted into an HTTP header, e.g. 'X-Forwarded-For'. There are Plugs available to extract the client IP from such a header, such as `Plug.RewriteOn`.
 
 > **Warning**: ensure that clients cannot spoof their IP address by including this header in their original request, by filtering such headers in the proxy!
 
@@ -245,6 +245,6 @@ To convert an RSA private key from DER to PEM format: `openssl rsa -in privkey.d
 
 The PKCS#12 format is a container format containing one or more certificates and/or encrypted keys. Such files typically have a `.p12` extension.
 
-To extract all certificates from a PKCS#12 file to a PEM file: `openssl pkcs12 -in server.p12 -nokeys -out fullchain.pem`. The resulting file contains all certificates from the input file, typically the server certificate and any CA certificates that make up the CA chain. You can split the file into seperate `cert.pem` and `chain.pem` files using a text editor, or you can just pass `certfile: fullchain.pem` to the HTTPS adapter.
+To extract all certificates from a PKCS#12 file to a PEM file: `openssl pkcs12 -in server.p12 -nokeys -out fullchain.pem`. The resulting file contains all certificates from the input file, typically the server certificate and any CA certificates that make up the CA chain. You can split the file into separate `cert.pem` and `chain.pem` files using a text editor, or you can just pass `certfile: fullchain.pem` to the HTTPS adapter.
 
 To extract a private key from a PKCS#12 file to a PEM file: `openssl pkcs12 -in server.p12 -nocerts -nodes -out privkey.pem`. You may want to replace the `-nodes` argument with `-aes128` to produce an encrypted, password protected PEM file.

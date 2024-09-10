@@ -1,6 +1,17 @@
 defmodule Plug.RouterTest do
+  defmodule SamplePlug do
+    import Plug.Conn
+
+    def init(:hello), do: :world
+    def init(options), do: options
+
+    def call(conn, options) do
+      send_resp(conn, 200, "#{inspect(options)}")
+    end
+  end
+
   defmodule Forward do
-    use Plug.Router
+    use Plug.Router, init_mode: :runtime
     use Plug.ErrorHandler
 
     plug :match
@@ -11,6 +22,8 @@ defmodule Plug.RouterTest do
     after
       Process.put(:plug_forward_call, true)
     end
+
+    forward "/forward_via", via: [:put, :post], to: SamplePlug, init_opts: [route: :via]
 
     get "/" do
       resp(conn, 200, "forwarded")
@@ -43,6 +56,11 @@ defmodule Plug.RouterTest do
       send_resp(conn, 200, id <> "--" <> List.last(conn.path_info))
     end
 
+    plug = SamplePlug
+    opts = :hello
+    get "/plug/match", to: SamplePlug
+    get "/plug/match/options", to: plug, init_opts: opts
+
     def handle_errors(conn, assigns) do
       # Custom call is always invoked before
       true = Process.get(:plug_forward_call)
@@ -60,17 +78,6 @@ defmodule Plug.RouterTest do
     plug :dispatch
 
     forward "/step2", to: Forward
-  end
-
-  defmodule SamplePlug do
-    import Plug.Conn
-
-    def init(:hello), do: :world
-    def init(options), do: options
-
-    def call(conn, options) do
-      send_resp(conn, 200, "#{inspect(options)}")
-    end
   end
 
   defmodule Sample do
@@ -105,10 +112,6 @@ defmodule Plug.RouterTest do
       resp(conn, 200, inspect(bar))
     end
 
-    get "/5/bar-*bar" do
-      resp(conn, 200, inspect(bar))
-    end
-
     match "/6/bar" do
       resp(conn, 200, "ok")
     end
@@ -119,6 +122,30 @@ defmodule Plug.RouterTest do
 
     get "/8/bar baz/:bat" do
       resp(conn, 200, bat)
+    end
+
+    get "/9/:bar.json" do
+      resp(conn, 200, inspect(bar))
+    end
+
+    get "/9/:bar-foo" do
+      resp(conn, 200, inspect(bar))
+    end
+
+    get "/9/:bar@foo" do
+      resp(conn, 200, inspect(bar))
+    end
+
+    get "/10/foo-:bar.json" do
+      resp(conn, 200, inspect(bar))
+    end
+
+    get "/11/:bar.js.map" do
+      resp(conn, 200, inspect(bar))
+    end
+
+    get "/11/:foo/:bar@app/baz/:bat.js.map" do
+      resp(conn, 200, [inspect(foo), inspect(bar), inspect(bat)] |> Enum.join(" "))
     end
 
     plug = SamplePlug
@@ -221,17 +248,65 @@ defmodule Plug.RouterTest do
     assert conn.resp_body == ~s("value")
   end
 
+  test "dispatch dynamic segment with suffix" do
+    conn = call(Sample, conn(:get, "/9/value.json"))
+    assert conn.resp_body == ~s("value")
+    assert conn.params == %{"bar" => "value"}
+    assert conn.path_params == %{"bar" => "value"}
+
+    conn = call(Sample, conn(:get, "/9/value-foo"))
+    assert conn.resp_body == ~s("value")
+    assert conn.params == %{"bar" => "value"}
+    assert conn.path_params == %{"bar" => "value"}
+
+    conn = call(Sample, conn(:get, "/9/value@foo"))
+    assert conn.resp_body == ~s("value")
+    assert conn.params == %{"bar" => "value"}
+    assert conn.path_params == %{"bar" => "value"}
+
+    conn = call(Sample, conn(:get, "/9/value"))
+    assert conn.resp_body == "oops"
+  end
+
+  test "dispatch dynamic segment with prefix and suffix" do
+    conn = call(Sample, conn(:get, "/10/foo-value.json"))
+    assert conn.resp_body == ~s("value")
+    assert conn.params == %{"bar" => "value"}
+    assert conn.path_params == %{"bar" => "value"}
+
+    conn = call(Sample, conn(:get, "/10/foo-value"))
+    assert conn.resp_body == "oops"
+  end
+
+  test "dispatch dynamic segment with multiple suffixes" do
+    conn = call(Sample, conn(:get, "/11/value.js.map"))
+    assert conn.resp_body == ~s("value")
+    assert conn.params == %{"bar" => "value"}
+    assert conn.path_params == %{"bar" => "value"}
+  end
+
+  test "dispatch multiple dynamic segments with multiple suffixes" do
+    conn = call(Sample, conn(:get, "/11/foo_value/bar_value@app/baz/bat_value.js.map"))
+    assert conn.resp_body == ~s("foo_value\" "bar_value" "bat_value")
+    assert conn.params == %{"bar" => "bar_value", "bat" => "bat_value", "foo" => "foo_value"}
+    assert conn.path_params == %{"bar" => "bar_value", "bat" => "bat_value", "foo" => "foo_value"}
+
+    conn = call(Sample, conn(:get, "/11/foo_value/bar_value/baz/bat_value.js.map"))
+    assert conn.resp_body == "oops"
+
+    conn = call(Sample, conn(:get, "/11/foo_value/bar_value@app/baz/bat_value.js"))
+    assert conn.resp_body == "oops"
+
+    conn = call(Sample, conn(:get, "/11/foo_value/bar_value/baz/bat_value"))
+    assert conn.resp_body == "oops"
+  end
+
   test "dispatch glob segment" do
     conn = call(Sample, conn(:get, "/4/value"))
     assert conn.resp_body == ~s(["value"])
 
     conn = call(Sample, conn(:get, "/4/value/extra"))
     assert conn.resp_body == ~s(["value", "extra"])
-  end
-
-  test "dispatch glob segment with prefix" do
-    conn = call(Sample, conn(:get, "/5/bar-value/extra"))
-    assert conn.resp_body == ~s(["bar-value", "extra"])
   end
 
   test "dispatch custom route" do
@@ -272,9 +347,7 @@ defmodule Plug.RouterTest do
   test "dispatch to plug" do
     conn = call(Sample, conn(:get, "/plug/match"))
     assert conn.resp_body == "[]"
-  end
 
-  test "dispatch to plug with options" do
     conn = call(Sample, conn(:get, "/plug/match/options"))
     assert conn.resp_body == ":world"
   end
@@ -283,6 +356,14 @@ defmodule Plug.RouterTest do
     conn = call(Sample, conn(:get, "/forward"))
     assert conn.resp_body == "forwarded"
     assert conn.path_info == ["forward"]
+  end
+
+  test "dispatch to plug with forwarding with runtime init" do
+    conn = call(Sample, conn(:get, "/forward/plug/match"))
+    assert conn.resp_body == "[]"
+
+    conn = call(Sample, conn(:get, "/forward/plug/match/options"))
+    assert conn.resp_body == ":world"
   end
 
   test "dispatch with forwarding with custom call" do
@@ -474,6 +555,14 @@ defmodule Plug.RouterTest do
     assert conn.status == 200
   end
 
+  test "forwards only :via methods" do
+    for method <- [:post, :put] do
+      resp = call(Forward, conn(method, "/forward_via"))
+      assert resp.status == 200
+      assert resp.resp_body == "[route: :via]"
+    end
+  end
+
   test "assigns options on forward" do
     conn = call(Sample, conn(:get, "/options/forward"))
     assert conn.private[:an_option] == :a_value
@@ -523,6 +612,32 @@ defmodule Plug.RouterTest do
 
     assert_received {:event, [:plug, :router_dispatch, :stop], %{duration: _},
                      %{route: "/", conn: %Plug.Conn{}, router: Sample}}
+  end
+
+  test "error is raised with expected message when match/3 is not given :to or :do option" do
+    assert_raise ArgumentError, "expected one of :to or :do to be given as option", fn ->
+      defmodule NoExpectedMatchOptions do
+        use Plug.Router
+
+        plug :match
+        plug :dispatch
+
+        match "/", foo: :bar
+      end
+    end
+  end
+
+  test "error is raised with expected message when no routes are defined" do
+    assert_raise RuntimeError,
+                 "no routes defined in module Plug.RouterTest.NoRoutes using Plug.Router",
+                 fn ->
+                   defmodule NoRoutes do
+                     use Plug.Router
+
+                     plug :match
+                     plug :dispatch
+                   end
+                 end
   end
 
   defp attach(handler_id, event) do
