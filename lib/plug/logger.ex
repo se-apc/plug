@@ -50,7 +50,7 @@ defmodule Plug.Logger do
 
   defp log(:debug, chardata_or_fun), do: Logger.debug(chardata_or_fun)
   defp log(:info, chardata_or_fun), do: Logger.info(chardata_or_fun)
-  defp log(:warn, chardata_or_fun), do: Logger.warn(chardata_or_fun)
+  defp log(:warn, chardata_or_fun), do: Logger.warning(chardata_or_fun)
   defp log(:error, chardata_or_fun), do: Logger.error(chardata_or_fun)
 
   defp formatted_diff(diff) when diff > 1000, do: [diff |> div(1000) |> Integer.to_string(), "ms"]
