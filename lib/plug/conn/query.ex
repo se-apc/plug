@@ -82,6 +82,14 @@ defmodule Plug.Conn.Query do
   For stateful decoding, see `decode_init/0`, `decode_each/2`, and `decode_done/2`.
   """
 
+  @typedoc """
+  Stateful decoder accumulator.
+
+  See `decode_init/0`, `decode_each/2`, and `decode_done/2`.
+  """
+  @typedoc since: "1.16.0"
+  @opaque decoder() :: map()
+
   require Logger
 
   @doc """
