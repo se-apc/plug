@@ -2,22 +2,24 @@ defmodule Plug.StaticTest do
   use ExUnit.Case, async: true
   use Plug.Test
 
-  defmodule MyPlug do
-    use Plug.Builder
+  @default_opts [
+    at: "/public",
+    from: Path.expand("..", __DIR__),
+    headers: %{"x-custom" => "x-value"},
+    content_types: %{"manifest-file" => "application/vnd.manifest+json"}
+  ]
 
-    plug Plug.Static,
-      at: "/public",
-      from: Path.expand("..", __DIR__),
-      gzip: true,
-      headers: %{"x-custom" => "x-value"},
-      content_types: %{"manifest-file" => "application/vnd.manifest+json"}
+  defp call(conn, opts \\ []) do
+    opts =
+      @default_opts
+      |> Keyword.merge(opts)
+      |> Plug.Static.init()
 
-    plug :passthrough
-
-    defp passthrough(conn, _), do: Plug.Conn.send_resp(conn, 404, "Passthrough")
+    with %Plug.Conn{halted: false} = conn <- Plug.Static.call(conn, opts),
+         do: passthrough(conn)
   end
 
-  defp call(conn), do: MyPlug.call(conn, [])
+  defp passthrough(conn), do: Plug.Conn.send_resp(conn, 404, "Passthrough")
 
   test "serves the file" do
     conn = call(conn(:get, "/public/fixtures/static.txt"))
@@ -31,6 +33,28 @@ defmodule Plug.StaticTest do
     assert conn.status == 200
     assert conn.resp_body == "[]"
     assert get_resp_header(conn, "content-type") == ["application/vnd.manifest+json"]
+  end
+
+  test "overwrites Content-Type by default" do
+    conn =
+      conn(:get, "/public/fixtures/static.txt")
+      |> put_resp_header("content-type", "application/octet-stream")
+      |> call()
+
+    assert conn.status == 200
+    assert conn.resp_body == "HELLO"
+    assert get_resp_header(conn, "content-type") == ["text/plain"]
+  end
+
+  test "preserves original Content-Type if requested" do
+    conn =
+      conn(:get, "/public/fixtures/static.txt")
+      |> put_resp_header("content-type", "application/octet-stream")
+      |> call(content_types: false)
+
+    assert conn.status == 200
+    assert conn.resp_body == "HELLO"
+    assert get_resp_header(conn, "content-type") == ["application/octet-stream"]
   end
 
   test "serves the file with a urlencoded filename" do
@@ -55,7 +79,7 @@ defmodule Plug.StaticTest do
     conn =
       conn(:get, "/public/fixtures/static.txt", nil)
       |> put_req_header("if-none-match", etag)
-      |> call
+      |> call(gzip: true)
 
     assert conn.status == 304
     assert conn.resp_body == ""
@@ -72,7 +96,7 @@ defmodule Plug.StaticTest do
     conn =
       conn(:get, "/public/fixtures/static.txt", [])
       |> put_req_header("accept-encoding", "gzip")
-      |> call
+      |> call(gzip: true)
 
     assert conn.status == 200
     assert conn.resp_body == "GZIPPED HELLO"
@@ -89,7 +113,7 @@ defmodule Plug.StaticTest do
       conn(:get, "/public/fixtures/static.txt", [])
       |> put_req_header("accept-encoding", "gzip")
       |> put_req_header("if-none-match", etag)
-      |> call
+      |> call(gzip: true)
 
     assert conn.status == 304
     assert conn.resp_body == ""
@@ -146,7 +170,7 @@ defmodule Plug.StaticTest do
     assert conn.status == 200
     assert conn.resp_body == "HELLO"
     assert get_resp_header(conn, "content-type") == ["text/plain"]
-    assert get_resp_header(conn, "cache-control") == ["public, max-age=31536000"]
+    assert get_resp_header(conn, "cache-control") == ["public, max-age=31536000, immutable"]
     assert get_resp_header(conn, "etag") == []
     assert get_resp_header(conn, "x-custom") == ["x-value"]
   end
@@ -160,7 +184,7 @@ defmodule Plug.StaticTest do
       headers: %{"x-custom" => "x-value"}
     ]
 
-    conn = Plug.Static.call(conn(:get, "/public/fixtures/static.txt"), Plug.Static.init(opts))
+    conn = call(conn(:get, "/public/fixtures/static.txt"), opts)
 
     assert conn.status == 200
     assert get_resp_header(conn, "cache-control") == ["max-age=0, private, must-revalidate"]
@@ -204,37 +228,49 @@ defmodule Plug.StaticTest do
   end
 
   test "returns 400 for unsafe paths" do
+    path = "/public/fixtures/../fixtures/static/file.txt"
+
     exception =
-      assert_raise Plug.Static.InvalidPathError, "invalid path for static asset", fn ->
-        call(conn(:get, "/public/fixtures/../fixtures/static/file.txt"))
+      assert_raise Plug.Static.InvalidPathError,
+                   "invalid path for static asset: #{path}",
+                   fn ->
+                     call(conn(:get, path))
+                   end
+
+    assert Plug.Exception.status(exception) == 400
+
+    path = "/public/fixtures/%2E%2E/fixtures/static/file.txt"
+
+    exception =
+      assert_raise Plug.Static.InvalidPathError, "invalid path for static asset: #{path}", fn ->
+        call(conn(:get, path))
       end
 
     assert Plug.Exception.status(exception) == 400
 
+    path = "/public/c:\\foo.txt"
+
     exception =
-      assert_raise Plug.Static.InvalidPathError, "invalid path for static asset", fn ->
-        call(conn(:get, "/public/fixtures/%2E%2E/fixtures/static/file.txt"))
+      assert_raise Plug.Static.InvalidPathError, "invalid path for static asset: #{path}", fn ->
+        call(conn(:get, path))
       end
 
     assert Plug.Exception.status(exception) == 400
 
+    path = "/public/sample.txt%00.html"
+
     exception =
-      assert_raise Plug.Static.InvalidPathError, "invalid path for static asset", fn ->
-        call(conn(:get, "/public/c:\\foo.txt"))
+      assert_raise Plug.Static.InvalidPathError, "invalid path for static asset: #{path}", fn ->
+        call(conn(:get, path))
       end
 
     assert Plug.Exception.status(exception) == 400
 
-    exception =
-      assert_raise Plug.Static.InvalidPathError, "invalid path for static asset", fn ->
-        call(conn(:get, "/public/sample.txt%00.html"))
-      end
-
-    assert Plug.Exception.status(exception) == 400
+    path = "/public/sample.txt\0.html"
 
     exception =
-      assert_raise Plug.Static.InvalidPathError, "invalid path for static asset", fn ->
-        call(conn(:get, "/public/sample.txt\0.html"))
+      assert_raise Plug.Static.InvalidPathError, "invalid path for static asset: #{path}", fn ->
+        call(conn(:get, path))
       end
 
     assert Plug.Exception.status(exception) == 400
@@ -244,7 +280,7 @@ defmodule Plug.StaticTest do
     conn =
       conn(:get, "/public/fixtures/static.txt", [])
       |> put_req_header("accept-encoding", "gzip")
-      |> call
+      |> call(gzip: true)
 
     assert conn.status == 200
     assert conn.resp_body == "GZIPPED HELLO"
@@ -256,7 +292,7 @@ defmodule Plug.StaticTest do
       conn(:get, "/public/fixtures/static.txt", [])
       |> put_req_header("accept-encoding", "*")
       |> put_resp_header("vary", "Whatever")
-      |> call
+      |> call(gzip: true)
 
     assert conn.status == 200
     assert conn.resp_body == "GZIPPED HELLO"
@@ -269,12 +305,35 @@ defmodule Plug.StaticTest do
     conn =
       conn(:get, "/public/fixtures/static%20with%20spaces.txt", [])
       |> put_req_header("accept-encoding", "gzip")
-      |> call
+      |> call(gzip: true)
 
     assert conn.status == 200
     assert conn.resp_body == "SPACES"
     assert get_resp_header(conn, "content-encoding") != ["gzip"]
     assert get_resp_header(conn, "vary") == ["Accept-Encoding"]
+  end
+
+  test "call/2 serves files from the app directory using a :from with an application name and directory" do
+    app_dir = Application.app_dir(:plug)
+    fixture = Path.join(app_dir, "tmp.txt")
+
+    try do
+      :ok = File.write!(fixture, "ABCD")
+
+      opts = [
+        at: "priv/static",
+        from: {:plug, "."}
+      ]
+
+      conn =
+        conn(:get, "/priv/static/tmp.txt")
+        |> call(opts)
+
+      assert conn.status == 200
+      assert conn.resp_body == "ABCD"
+    after
+      :ok = File.rm!(fixture)
+    end
   end
 
   test "raises an exception if :from isn't a binary or an atom" do
@@ -433,7 +492,7 @@ defmodule Plug.StaticTest do
       assert conn.resp_body == ""
       assert get_resp_header(conn, "cache-control") == ["public"]
       assert get_resp_header(conn, "x-custom") == []
-      assert get_resp_header(conn, "vary") == ["Accept-Encoding"]
+      assert get_resp_header(conn, "vary") == []
 
       assert get_resp_header(conn, "content-type") == []
       assert get_resp_header(conn, "content-encoding") == []
@@ -450,7 +509,7 @@ defmodule Plug.StaticTest do
       conn =
         conn(:get, "/public/fixtures/static.txt")
         |> put_req_header("range", "bytes=0-1")
-        |> Plug.Static.call(Plug.Static.init(opts))
+        |> call(opts)
 
       assert conn.status == 206
       assert conn.resp_body == "HE"
@@ -468,7 +527,7 @@ defmodule Plug.StaticTest do
         conn(:get, "/public/fixtures/static.txt", nil)
         |> put_req_header("range", "bytes=0-1")
         |> put_req_header("if-none-match", etag)
-        |> Plug.Static.call(Plug.Static.init(opts))
+        |> call(opts)
 
       assert conn.status == 304
       assert conn.resp_body == ""
@@ -489,7 +548,7 @@ defmodule Plug.StaticTest do
       assert get_resp_header(conn, "content-type") == ["text/plain"]
       assert get_resp_header(conn, "accept-ranges") == ["bytes"]
       assert get_resp_header(conn, "content-range") == ["bytes 0-1/5"]
-      assert get_resp_header(conn, "cache-control") == ["public, max-age=31536000"]
+      assert get_resp_header(conn, "cache-control") == ["public, max-age=31536000, immutable"]
       assert get_resp_header(conn, "etag") == []
       assert get_resp_header(conn, "x-custom") == ["x-value"]
     end
@@ -506,7 +565,7 @@ defmodule Plug.StaticTest do
       conn =
         conn(:get, "/public/fixtures/static.txt")
         |> put_req_header("range", "bytes=0-1")
-        |> Plug.Static.call(Plug.Static.init(opts))
+        |> call(opts)
 
       assert conn.status == 206
       assert conn.resp_body == "HE"
@@ -515,6 +574,229 @@ defmodule Plug.StaticTest do
       assert get_resp_header(conn, "cache-control") == ["max-age=0, private, must-revalidate"]
       assert get_resp_header(conn, "etag") == []
       assert get_resp_header(conn, "x-custom") == ["x-value"]
+    end
+  end
+
+  describe "encodings" do
+    test "serves file if no accept-encoding header" do
+      conn =
+        conn(:get, "/public/fixtures/static.txt", [])
+        |> call(
+          encodings: [
+            {"br", ".br"},
+            {"gzip", ".gz"}
+          ]
+        )
+
+      assert conn.status == 200
+      assert conn.resp_body == "HELLO"
+      assert get_resp_header(conn, "content-encoding") == []
+      assert get_resp_header(conn, "vary") == ["Accept-Encoding"]
+      assert get_resp_header(conn, "x-custom") == ["x-value"]
+    end
+
+    test "serves file if unknown value in accept-encoding header" do
+      conn =
+        conn(:get, "/public/fixtures/static.txt", [])
+        |> put_req_header("accept-encoding", "zstd")
+        |> call(
+          encodings: [
+            {"br", ".br"},
+            {"gzip", ".gz"}
+          ]
+        )
+
+      assert conn.status == 200
+      assert conn.resp_body == "HELLO"
+      assert get_resp_header(conn, "content-encoding") == []
+      assert get_resp_header(conn, "vary") == ["Accept-Encoding"]
+      assert get_resp_header(conn, "x-custom") == ["x-value"]
+    end
+
+    test "serves first known extension" do
+      conn =
+        conn(:get, "/public/fixtures/static.txt", [])
+        |> put_req_header("accept-encoding", "*")
+        |> call(
+          encodings: [
+            {"zstd", ".zst"},
+            {"br", ".br"},
+            {"gzip", ".gz"}
+          ]
+        )
+
+      assert conn.status == 200
+      assert conn.resp_body == "ZSTANDARDED HELLO"
+      assert get_resp_header(conn, "content-encoding") == ["zstd"]
+      assert get_resp_header(conn, "vary") == ["Accept-Encoding"]
+      assert get_resp_header(conn, "x-custom") == ["x-value"]
+
+      req =
+        conn(:get, "/public/fixtures/static.txt", [])
+        |> put_req_header("accept-encoding", "zstd,br,gzip")
+
+      conn =
+        call(req,
+          encodings: [
+            {"zstd", ".zst"},
+            {"br", ".br"},
+            {"gzip", ".gz"}
+          ]
+        )
+
+      assert conn.status == 200
+      assert conn.resp_body == "ZSTANDARDED HELLO"
+      assert get_resp_header(conn, "content-encoding") == ["zstd"]
+      assert get_resp_header(conn, "vary") == ["Accept-Encoding"]
+      assert get_resp_header(conn, "x-custom") == ["x-value"]
+
+      conn =
+        call(req,
+          encodings: [
+            {"br", ".br"},
+            {"gzip", ".gz"}
+          ]
+        )
+
+      assert conn.status == 200
+      assert conn.resp_body == "BROTLIED HELLO"
+      assert get_resp_header(conn, "content-encoding") == ["br"]
+      assert get_resp_header(conn, "vary") == ["Accept-Encoding"]
+      assert get_resp_header(conn, "x-custom") == ["x-value"]
+
+      conn =
+        call(req,
+          encodings: [
+            {"gzip", ".gz"}
+          ]
+        )
+
+      assert conn.status == 200
+      assert conn.resp_body == "GZIPPED HELLO"
+      assert get_resp_header(conn, "content-encoding") == ["gzip"]
+      assert get_resp_header(conn, "vary") == ["Accept-Encoding"]
+      assert get_resp_header(conn, "x-custom") == ["x-value"]
+
+      conn = call(req, encodings: [])
+
+      assert conn.status == 200
+      assert conn.resp_body == "HELLO"
+      assert get_resp_header(conn, "content-encoding") == []
+      assert get_resp_header(conn, "vary") == []
+      assert get_resp_header(conn, "x-custom") == ["x-value"]
+    end
+
+    test "serves gzipped file" do
+      conn =
+        conn(:get, "/public/fixtures/static.txt", [])
+        |> put_req_header("accept-encoding", "gzip")
+        |> call(encodings: [{"gzip", ".gz"}])
+
+      assert conn.status == 200
+      assert conn.resp_body == "GZIPPED HELLO"
+      assert get_resp_header(conn, "content-encoding") == ["gzip"]
+      assert get_resp_header(conn, "vary") == ["Accept-Encoding"]
+      assert get_resp_header(conn, "x-custom") == ["x-value"]
+
+      conn =
+        conn(:get, "/public/fixtures/static.txt", [])
+        |> put_req_header("accept-encoding", "*")
+        |> put_resp_header("vary", "Whatever")
+        |> call(encodings: [{"gzip", ".gz"}])
+
+      assert conn.status == 200
+      assert conn.resp_body == "GZIPPED HELLO"
+      assert get_resp_header(conn, "content-encoding") == ["gzip"]
+      assert get_resp_header(conn, "vary") == ["Accept-Encoding", "Whatever"]
+      assert get_resp_header(conn, "x-custom") == ["x-value"]
+    end
+
+    test "serves brotlied file" do
+      conn =
+        conn(:get, "/public/fixtures/static.txt", [])
+        |> put_req_header("accept-encoding", "br")
+        |> call(encodings: [{"br", ".br"}])
+
+      assert conn.status == 200
+      assert conn.resp_body == "BROTLIED HELLO"
+      assert get_resp_header(conn, "content-encoding") == ["br"]
+      assert get_resp_header(conn, "vary") == ["Accept-Encoding"]
+      assert get_resp_header(conn, "x-custom") == ["x-value"]
+
+      conn =
+        conn(:get, "/public/fixtures/static.txt", [])
+        |> put_req_header("accept-encoding", "*")
+        |> put_resp_header("vary", "Whatever")
+        |> call(encodings: [{"br", ".br"}])
+
+      assert conn.status == 200
+      assert conn.resp_body == "BROTLIED HELLO"
+      assert get_resp_header(conn, "content-encoding") == ["br"]
+      assert get_resp_header(conn, "vary") == ["Accept-Encoding", "Whatever"]
+      assert get_resp_header(conn, "x-custom") == ["x-value"]
+    end
+
+    test "serves zstandarded file" do
+      conn =
+        conn(:get, "/public/fixtures/static.txt", [])
+        |> put_req_header("accept-encoding", "zstd")
+        |> call(encodings: [{"zstd", ".zst"}])
+
+      assert conn.status == 200
+      assert conn.resp_body == "ZSTANDARDED HELLO"
+      assert get_resp_header(conn, "content-encoding") == ["zstd"]
+      assert get_resp_header(conn, "vary") == ["Accept-Encoding"]
+      assert get_resp_header(conn, "x-custom") == ["x-value"]
+
+      conn =
+        conn(:get, "/public/fixtures/static.txt", [])
+        |> put_req_header("accept-encoding", "*")
+        |> put_resp_header("vary", "Whatever")
+        |> call(encodings: [{"zstd", ".zst"}])
+
+      assert conn.status == 200
+      assert conn.resp_body == "ZSTANDARDED HELLO"
+      assert get_resp_header(conn, "content-encoding") == ["zstd"]
+      assert get_resp_header(conn, "vary") == ["Accept-Encoding", "Whatever"]
+      assert get_resp_header(conn, "x-custom") == ["x-value"]
+    end
+
+    test "old options still work" do
+      assert Plug.Static.init(at: "/", from: "/foo", gzip: true) ==
+               Plug.Static.init(at: "/", from: "/foo", encodings: [{"gzip", ".gz"}])
+
+      assert Plug.Static.init(at: "/", from: "/foo", brotli: true) ==
+               Plug.Static.init(at: "/", from: "/foo", encodings: [{"br", ".br"}])
+
+      assert Plug.Static.init(at: "/", from: "/foo", brotli: true, gzip: true) ==
+               Plug.Static.init(
+                 at: "/",
+                 from: "/foo",
+                 encodings: [{"br", ".br"}, {"gzip", ".gz"}]
+               )
+
+      assert Plug.Static.init(at: "/", from: "/foo", gzip: true, brotli: true) ==
+               Plug.Static.init(
+                 at: "/",
+                 from: "/foo",
+                 encodings: [{"br", ".br"}, {"gzip", ".gz"}]
+               )
+    end
+
+    test "old options values are appended to the given encodings list" do
+      assert Plug.Static.init(at: "/", from: "/foo", encodings: [{"zstd", ".zst"}], gzip: true) ==
+               Plug.Static.init(
+                 at: "/",
+                 from: "/foo",
+                 encodings: [{"zstd", ".zst"}, {"gzip", ".gz"}]
+               )
+
+      assert Plug.Static.init(at: "/", from: "/foo", encodings: [{"zstd", ".zst"}], brotli: true) ==
+               Plug.Static.init(
+                 at: "/",
+                 from: "/foo",
+                 encodings: [{"zstd", ".zst"}, {"br", ".br"}]
+               )
     end
   end
 
@@ -566,7 +848,7 @@ defmodule Plug.StaticTest do
       headers: {HeaderGenerator, :generate, [{"x-custom", "x-value"}]}
     ]
 
-    conn = Plug.Static.call(conn(:get, "/public/fixtures/static.txt"), Plug.Static.init(opts))
+    conn = call(conn(:get, "/public/fixtures/static.txt"), opts)
 
     assert conn.status == 200
     assert get_resp_header(conn, "x-custom") == ["x-value"]
@@ -580,7 +862,7 @@ defmodule Plug.StaticTest do
 
     conn =
       conn(:get, "/public/fixtures/static.txt")
-      |> Plug.Static.call(Plug.Static.init(opts))
+      |> call(opts)
 
     assert conn.status == 200
   end

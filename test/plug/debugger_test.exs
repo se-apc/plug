@@ -51,6 +51,11 @@ defmodule Plug.DebuggerTest do
       raise "oops"
     end
 
+    get "/bad_match" do
+      _ = conn
+      bad_match(:six, :one)
+    end
+
     get "/send_and_wrapped" do
       stack =
         try do
@@ -75,6 +80,10 @@ defmodule Plug.DebuggerTest do
 
     defp add_csp(conn, _opts),
       do: Plug.Conn.put_resp_header(conn, "content-security-policy", "abcdef")
+
+    defp bad_match(:one, :two), do: :ok
+    defp bad_match(:three, :four), do: :ok
+    defp bad_match(:five, :six), do: :ok
   end
 
   defmodule StyledRouter do
@@ -294,6 +303,15 @@ defmodule Plug.DebuggerTest do
     assert conn.resp_body =~ "session_value"
   end
 
+  test "shows copy markdown button" do
+    conn =
+      conn(:get, "/")
+      |> put_req_header("accept", "text/html")
+      |> render([], fn -> raise "oops" end)
+
+    assert conn.resp_body =~ "Copy markdown"
+  end
+
   defp stack(stack) do
     render(put_req_header(conn(:get, "/"), "accept", "text/html"), [stack: stack], fn ->
       raise "oops"
@@ -314,7 +332,7 @@ defmodule Plug.DebuggerTest do
     assert conn.resp_body =~ "&lt;script&gt;oops&lt;/script&gt;"
   end
 
-  test "uses PLUG_EDITOR" do
+  test "uses PLUG_EDITOR with __FILE__" do
     System.put_env("PLUG_EDITOR", "hello://open?file=__FILE__&line=__LINE__")
 
     conn = stack([{Plug.Conn, :unknown, 1, file: "lib/plug/conn.ex", line: 1}])
@@ -324,6 +342,16 @@ defmodule Plug.DebuggerTest do
     conn = stack([{GenServer, :call, 2, file: "lib/gen_server.ex", line: 10_000}])
     file = Path.expand(GenServer.__info__(:compile)[:source])
     assert conn.resp_body =~ "hello://open?file=#{file}&amp;line=10000"
+  end
+
+  test "uses PLUG_EDITOR with __RELATIVEFILE__" do
+    System.put_env("PLUG_EDITOR", "hello://open?file=__RELATIVEFILE__&line=__LINE__")
+
+    conn = stack([{Plug.Conn, :unknown, 1, file: "lib/plug/conn.ex", line: 1}])
+    assert conn.resp_body =~ "hello://open?file=lib/plug/conn.ex&amp;line=1"
+
+    conn = stack([{GenServer, :call, 2, file: "lib/gen_server.ex", line: 10_000}])
+    assert conn.resp_body =~ "hello://open?file=lib/gen_server.ex&amp;line=10000"
   end
 
   test "styles can be overridden" do
@@ -363,6 +391,22 @@ defmodule Plug.DebuggerTest do
 
     assert conn.resp_body =~ "# Plug.Parsers.UnsupportedMediaTypeError at GET /"
     assert conn.resp_body =~ "unsupported media type foo/bar"
+  end
+
+  test "renders bad match attempted arguments" do
+    conn =
+      conn(:get, "/bad_match")
+      |> put_req_header("accept", "text/markdown")
+      |> put_resp_header("content-security-policy", "abcdef")
+
+    capture_log(fn -> assert_raise(FunctionClauseError, fn -> Router.call(conn, []) end) end)
+    {_status, _headers, body} = sent_resp(conn)
+
+    assert body =~ "# FunctionClauseError at GET /bad_match"
+    assert body =~ "Code:\n"
+    assert body =~ "  Called with 2 arguments"
+    assert body =~ "  * `:six`"
+    assert body =~ "  * `:one`"
   end
 
   test "render actions when an implementation of `Plug.Exception` has it" do
@@ -422,8 +466,20 @@ defmodule Plug.DebuggerTest do
     refute body =~ ~s|<form action="/__plug__/debugger/action" method="POST">|
   end
 
-  test "sets last path as the current request path when is a GET" do
+  test "sets last path as the current request path when is a GET without query string" do
     path = "/actionable_exception"
+
+    conn =
+      conn(:get, path)
+      |> put_req_header("accept", "text/html")
+      |> Map.put(:secret_key_base, "secret")
+
+    %Plug.Conn{resp_body: body} = render(conn, [], fn -> raise ActionableError end)
+    assert body =~ ~s|<input type="hidden" name="last_path" value="#{path}">|
+  end
+
+  test "sets last path as the current request path when is a GET with query string" do
+    path = "/actionable_exception?a=b"
 
     conn =
       conn(:get, path)

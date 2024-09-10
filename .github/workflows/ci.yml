@@ -4,41 +4,52 @@ on:
   pull_request:
   push:
     branches:
-      - master
+      - main
 
 jobs:
   test:
-    runs-on: ubuntu-16.04
+    runs-on: ubuntu-20.04
     env:
       MIX_ENV: test
+      PLUG_CRYPTO_2_0: "${{ matrix.PLUG_CRYPTO_2_0 }}"
     strategy:
       fail-fast: false
       matrix:
         include:
-          - pair:
-              elixir: 1.7.4
-              otp: 19.3.6.13
-          - pair:
-              elixir: 1.11.4
-              otp: 23.2.7
+          # Earliest-supported Elixir/Erlang pair.
+          - elixir: "1.10.4"
+            otp: "21.3"
+            PLUG_CRYPTO_2_0: "false"
+
+          # Latest-supported Elixir/Erlang pair.
+          - elixir: "1.17"
+            otp: "27.0"
             lint: lint
+            PLUG_CRYPTO_2_0: "true"
+
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
-      - uses: erlef/setup-elixir@v1
+      - name: Install Erlang and Elixir
+        uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{matrix.pair.otp}}
-          elixir-version: ${{matrix.pair.elixir}}
+          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
 
-      - name: Install Dependencies
-        run: mix deps.get --only test
+      - name: Install dependencies
+        run: mix deps.get
 
-      - run: mix format --check-formatted
+      - name: Ensure mix.lock is up to date
+        run: mix deps.get --check-locked
         if: ${{ matrix.lint }}
 
-      - run: mix deps.get && mix deps.unlock --check-unused
+      - name: Ensure that files are formatted
+        run: mix format --check-formatted
         if: ${{ matrix.lint }}
 
-      - run: mix deps.compile
+      - name: Check for unused dependencies
+        run: mix deps.unlock --check-unused
+        if: ${{ matrix.lint }}
 
-      - run: mix test
+      - name: Run tests
+        run: mix test

@@ -5,8 +5,6 @@ defmodule Plug.ConnTest do
   alias Plug.Conn
   alias Plug.ProcessStore
 
-  import ExUnit.CaptureIO
-
   test "test adapter builds on connection" do
     conn =
       Plug.Adapters.Test.Conn.conn(%Plug.Conn{private: %{hello: :world}}, :post, "/hello", nil)
@@ -379,15 +377,6 @@ defmodule Plug.ConnTest do
     assert conn.resp_body == "HELLO\nWORLD\n"
   end
 
-  test "send_chunked/3 with collectable" do
-    conn = send_chunked(conn(:get, "/foo"), 200)
-
-    capture_io(:stderr, fn ->
-      conn = Enum.into(~w(hello world), conn)
-      assert conn.resp_body == "helloworld"
-    end)
-  end
-
   test "send_chunked/3 sends self a message" do
     refute_received {:plug_conn, :sent}
     send_chunked(conn(:get, "/foo"), 200)
@@ -449,19 +438,37 @@ defmodule Plug.ConnTest do
     )
   end
 
-  test "push/3 performs a server push" do
-    conn = conn(:get, "/foo") |> push("/static/application.css", [{"accept", "text/plain"}])
-    assert {"/static/application.css", [{"accept", "text/plain"}]} in sent_pushes(conn)
+  test "inform!/3 performs an informational request" do
+    conn = conn(:get, "/foo") |> inform!(103, [{"link", "</style.css>; rel=preload; as=style"}])
+    assert {103, [{"link", "</style.css>; rel=preload; as=style"}]} in sent_informs(conn)
   end
 
-  test "push/3 works out the MIME type if not set" do
-    conn = conn(:get, "/foo") |> push("/static/application.css")
-    assert {"/static/application.css", [{"accept", "text/css"}]} in sent_pushes(conn)
+  test "upgrade_adapter/3 requests an upgrade" do
+    conn = conn(:get, "/foo") |> upgrade_adapter(:supported, opt: :supported)
+    assert {:supported, [opt: :supported]} in sent_upgrades(conn)
   end
 
-  test "push/3 will raise if the response is sent before pushing" do
+  test "upgrade_adapter/3 sets the connection to :upgraded for supported upgrades" do
+    conn = conn(:get, "/foo") |> upgrade_adapter(:supported, opt: :supported)
+    assert conn.state == :upgraded
+  end
+
+  test "upgrade_adapter/3 raises an error on unsupported upgrades" do
+    assert_raise(
+      ArgumentError,
+      "upgrade to not_supported not supported by Plug.Adapters.Test.Conn",
+      fn ->
+        conn(:get, "/foo")
+        |> upgrade_adapter(:not_supported, opt: :not_supported)
+      end
+    )
+  end
+
+  test "upgrade_adapter/3 will raise if the response is sent before upgrading" do
     assert_raise(Plug.Conn.AlreadySentError, fn ->
-      conn(:get, "/foo") |> send_chunked(200) |> push("/static/application.css")
+      conn(:get, "/foo")
+      |> send_chunked(200)
+      |> upgrade_adapter(:supported, opt: :supported)
     end)
   end
 
@@ -497,7 +504,7 @@ defmodule Plug.ConnTest do
     end
   end
 
-  test "put_resp_header/3 raises when invalid header key given" do
+  test "put_resp_header/3 raises when non-normalized header key given" do
     Application.put_env(:plug, :validate_header_keys_during_test, true)
     conn = conn(:get, "/foo")
 
@@ -506,25 +513,47 @@ defmodule Plug.ConnTest do
     end
   end
 
-  test "put_resp_header/3 doesn't raise with invalid header key given when :validate_header_keys_during_test is disabled" do
+  test "put_resp_header/3 doesn't raise with non-normalized header key given when :validate_header_keys_during_test is disabled" do
     Application.put_env(:plug, :validate_header_keys_during_test, false)
     conn = conn(:get, "/foo")
     put_resp_header(conn, "X-Foo", "bar")
   end
 
+  test "put_resp_header/3 raises when invalid header key given" do
+    Application.put_env(:plug, :validate_header_keys_during_test, true)
+    conn = conn(:get, "/foo")
+
+    assert_raise Plug.Conn.InvalidHeaderError,
+                 ~S[header "foo\r" contains a control feed (\r), colon (:), newline (\n) or null (\x00)],
+                 fn ->
+                   put_resp_header(conn, "foo\r", "bar")
+                 end
+  end
+
+  test "put_resp_header/3 raises when invalid header key given even when :validate_header_keys_during_test is disabled" do
+    Application.put_env(:plug, :validate_header_keys_during_test, false)
+    conn = conn(:get, "/foo")
+
+    assert_raise Plug.Conn.InvalidHeaderError,
+                 ~S[header "foo\r" contains a control feed (\r), colon (:), newline (\n) or null (\x00)],
+                 fn ->
+                   put_resp_header(conn, "foo\r", "bar")
+                 end
+  end
+
   test "put_resp_header/3 raises when invalid header value given" do
     message =
-      ~S[value for header "x-sample" contains control feed (\r) or newline (\n): "value\rBAR"]
+      ~S[value for header "x-sample" contains control feed (\r), newline (\n) or null (\x00): "value\rBAR"]
 
     assert_raise Plug.Conn.InvalidHeaderError, message, fn ->
-      put_resp_header(conn(:get, "foo"), "x-sample", "value\rBAR")
+      put_resp_header(conn(:get, "/foo"), "x-sample", "value\rBAR")
     end
 
     message =
-      ~S[value for header "x-sample" contains control feed (\r) or newline (\n): "value\n\nBAR"]
+      ~S[value for header "x-sample" contains control feed (\r), newline (\n) or null (\x00): "value\n\nBAR"]
 
     assert_raise Plug.Conn.InvalidHeaderError, message, fn ->
-      put_resp_header(conn(:get, "foo"), "x-sample", "value\n\nBAR")
+      put_resp_header(conn(:get, "/foo"), "x-sample", "value\n\nBAR")
     end
   end
 
@@ -551,7 +580,7 @@ defmodule Plug.ConnTest do
     end
   end
 
-  test "prepend_resp_headers/2 raises when invalid header key given" do
+  test "prepend_resp_headers/2 raises when non-normalized header key given" do
     Application.put_env(:plug, :validate_header_keys_during_test, true)
     conn = conn(:get, "/foo")
 
@@ -560,7 +589,7 @@ defmodule Plug.ConnTest do
     end
   end
 
-  test "prepend_resp_headers/2 doesn't raise with invalid header key given when :validate_header_keys_during_test is disabled" do
+  test "prepend_resp_headers/2 doesn't raise with non-normalized header key given when :validate_header_keys_during_test is disabled" do
     Application.put_env(:plug, :validate_header_keys_during_test, false)
     conn = conn(:get, "/foo")
     prepend_resp_headers(conn, [{"X-Foo", "bar"}])
@@ -568,33 +597,55 @@ defmodule Plug.ConnTest do
 
   test "prepend_resp_headers/2 raises when invalid header value given" do
     message =
-      ~S[value for header "x-sample" contains control feed (\r) or newline (\n): "value\rBAR"]
+      ~S[value for header "x-sample" contains control feed (\r), newline (\n) or null (\x00): "value\rBAR"]
 
     assert_raise Plug.Conn.InvalidHeaderError, message, fn ->
-      prepend_resp_headers(conn(:get, "foo"), [{"x-sample", "value\rBAR"}])
+      prepend_resp_headers(conn(:get, "/foo"), [{"x-sample", "value\rBAR"}])
     end
 
     message =
-      ~S[value for header "x-sample" contains control feed (\r) or newline (\n): "value\n\nBAR"]
+      ~S[value for header "x-sample" contains control feed (\r), newline (\n) or null (\x00): "value\n\nBAR"]
 
     assert_raise Plug.Conn.InvalidHeaderError, message, fn ->
-      prepend_resp_headers(conn(:get, "foo"), [{"x-sample", "value\n\nBAR"}])
+      prepend_resp_headers(conn(:get, "/foo"), [{"x-sample", "value\n\nBAR"}])
     end
   end
 
-  test "merge_resp_header/3 raises when invalid header value given" do
+  test "prepend_resp_headers/2 raises when invalid header key given" do
+    Application.put_env(:plug, :validate_header_keys_during_test, true)
+    conn = conn(:get, "/foo")
+
+    assert_raise Plug.Conn.InvalidHeaderError,
+                 ~S[header "foo\n" contains a control feed (\r), colon (:), newline (\n) or null (\x00)],
+                 fn ->
+                   prepend_resp_headers(conn, [{"foo\n", "bar"}])
+                 end
+  end
+
+  test "prepend_resp_header/2 raises when invalid header key given even when :validate_header_keys_during_test is disabled" do
+    Application.put_env(:plug, :validate_header_keys_during_test, false)
+    conn = conn(:get, "/foo")
+
+    assert_raise Plug.Conn.InvalidHeaderError,
+                 ~S[header "foo\n" contains a control feed (\r), colon (:), newline (\n) or null (\x00)],
+                 fn ->
+                   prepend_resp_headers(conn, [{"foo\n", "bar"}])
+                 end
+  end
+
+  test "merge_resp_headers/3 raises when invalid header value given" do
     message =
-      ~S[value for header "x-sample" contains control feed (\r) or newline (\n): "value\rBAR"]
+      ~S[value for header "x-sample" contains control feed (\r), newline (\n) or null (\x00): "value\rBAR"]
 
     assert_raise Plug.Conn.InvalidHeaderError, message, fn ->
-      merge_resp_headers(conn(:get, "foo"), [{"x-sample", "value\rBAR"}])
+      merge_resp_headers(conn(:get, "/foo"), [{"x-sample", "value\rBAR"}])
     end
 
     message =
-      ~S[value for header "x-sample" contains control feed (\r) or newline (\n): "value\n\nBAR"]
+      ~S[value for header "x-sample" contains control feed (\r), newline (\n) or null (\x00): "value\n\nBAR"]
 
     assert_raise Plug.Conn.InvalidHeaderError, message, fn ->
-      merge_resp_headers(conn(:get, "foo"), [{"x-sample", "value\n\nBAR"}])
+      merge_resp_headers(conn(:get, "/foo"), [{"x-sample", "value\n\nBAR"}])
     end
   end
 
@@ -691,6 +742,54 @@ defmodule Plug.ConnTest do
     assert get_req_header(conn, "foo") == []
   end
 
+  test "merge_req_headers/3" do
+    conn1 = merge_req_headers(conn(:head, "/foo"), %{"x-foo" => "bar", "x-bar" => "baz"})
+    assert get_req_header(conn1, "x-foo") == ["bar"]
+    assert get_req_header(conn1, "x-bar") == ["baz"]
+    conn2 = merge_req_headers(conn1, %{"x-foo" => "new"})
+    assert get_req_header(conn2, "x-foo") == ["new"]
+    assert get_req_header(conn2, "x-bar") == ["baz"]
+    assert length(conn1.req_headers) == length(conn2.req_headers)
+  end
+
+  test "prepend_req_headers/2" do
+    conn1 = prepend_req_headers(conn(:head, "/foo"), [{"x-foo", "bar"}])
+    assert get_req_header(conn1, "x-foo") == ["bar"]
+    conn2 = prepend_req_headers(conn1, [{"x-foo", "baz"}])
+    assert get_req_header(conn2, "x-foo") == ["baz", "bar"]
+  end
+
+  test "prepend_req_headers/2 raises when the conn was already been sent" do
+    conn = send_resp(conn(:get, "/foo"), 200, "ok")
+
+    assert_raise Plug.Conn.AlreadySentError, fn ->
+      prepend_req_headers(conn, [{"x-foo", "bar"}])
+    end
+  end
+
+  test "prepend_req_headers/2 raises when the conn is chunked" do
+    conn = send_chunked(conn(:get, "/foo"), 200)
+
+    assert_raise Plug.Conn.AlreadySentError, fn ->
+      prepend_req_headers(conn, [{"x-foo", "bar"}])
+    end
+  end
+
+  test "prepend_req_headers/2 raises when non-normalized header key given" do
+    Application.put_env(:plug, :validate_header_keys_during_test, true)
+    conn = conn(:get, "/foo")
+
+    assert_raise Plug.Conn.InvalidHeaderError, ~S[header key is not lowercase: "X-Foo"], fn ->
+      prepend_req_headers(conn, [{"X-Foo", "bar"}])
+    end
+  end
+
+  test "prepend_req_headers/2 doesn't raise with non-normalized header key given when :validate_header_keys_during_test is disabled" do
+    Application.put_env(:plug, :validate_header_keys_during_test, false)
+    conn = conn(:get, "/foo")
+    prepend_req_headers(conn, [{"X-Foo", "bar"}])
+  end
+
   test "put_req_header/3" do
     conn1 = put_req_header(conn(:head, "/foo"), "x-foo", "bar")
     assert get_req_header(conn1, "x-foo") == ["bar"]
@@ -707,7 +806,7 @@ defmodule Plug.ConnTest do
     end
   end
 
-  test "put_req_header/3 raises when invalid header key given" do
+  test "put_req_header/3 raises when non-normalized header key given" do
     Application.put_env(:plug, :validate_header_keys_during_test, true)
     conn = conn(:get, "/foo")
 
@@ -716,7 +815,29 @@ defmodule Plug.ConnTest do
     end
   end
 
-  test "put_req_header/3 doesn't raise with invalid header key given when :validate_header_keys_during_test is disabled" do
+  test "put_req_header/3 raises when trying to set the host header" do
+    Application.put_env(:plug, :validate_header_keys_during_test, true)
+    conn = conn(:get, "/foo")
+
+    assert_raise Plug.Conn.InvalidHeaderError,
+                 ~S[set the host header with %Plug.Conn{conn | host: "example.com"}],
+                 fn ->
+                   put_req_header(conn, "host", "bar")
+                 end
+  end
+
+  test "put_req_header/3 raises when trying to set the host header even when :validate_header_keys_during_test is disabled" do
+    Application.put_env(:plug, :validate_header_keys_during_test, false)
+    conn = conn(:get, "/foo")
+
+    assert_raise Plug.Conn.InvalidHeaderError,
+                 ~S[set the host header with %Plug.Conn{conn | host: "example.com"}],
+                 fn ->
+                   put_req_header(conn, "host", "bar")
+                 end
+  end
+
+  test "put_req_header/3 doesn't raise with non-normalized header key given when :validate_header_keys_during_test is disabled" do
     Application.put_env(:plug, :validate_header_keys_during_test, false)
     conn = conn(:get, "/foo")
     put_req_header(conn, "X-Foo", "bar")
@@ -1094,6 +1215,17 @@ defmodule Plug.ConnTest do
       refute Map.has_key?(fetch_cookies(new_conn, signed: "foo").cookies, "foo")
     end
 
+    test "put_resp_cookie/4 with sign: true and max_age: nil" do
+      conn =
+        secret_conn()
+        |> fetch_cookies()
+        |> put_resp_cookie("foo", {:signed, :cookie}, sign: true, max_age: nil)
+        |> send_resp(200, "OK")
+
+      new_conn = secret_conn() |> recycle_cookies(conn) |> fetch_cookies(signed: ~w(foo))
+      assert Map.get(new_conn.cookies, "foo") == {:signed, :cookie}
+    end
+
     test "put_resp_cookie/4 with encrypt: true and max_age: 0" do
       conn =
         secret_conn()
@@ -1147,6 +1279,7 @@ defmodule Plug.ConnTest do
 
     conn = put_session(conn, "foo", :bar)
     conn = put_session(conn, :key, 42)
+    conn = put_session(conn, "is_nil", nil)
 
     assert conn.private[:plug_session_info] == :write
 
@@ -1156,6 +1289,11 @@ defmodule Plug.ConnTest do
     assert get_session(conn, "foo") == :bar
     assert get_session(conn, "key") == 42
     assert get_session(conn, "unknown") == nil
+
+    assert get_session(conn, "unknown", nil) == nil
+    assert get_session(conn, "unknown", true) == true
+    assert get_session(conn, :unknown, 42) == 42
+    assert get_session(conn, "is_nil", 42) == nil
 
     conn = %{conn | state: :sent}
 

@@ -40,6 +40,19 @@ defmodule Plug.Router.UtilsTest do
     assert quote(@opts, do: {[:username], ["foo", username]}) == build_path_match("foo/:username")
   end
 
+  test "build match with multiple identifiers" do
+    assert quote(@opts, do: {[:id, :name, :category], ["foo", id, name, category]}) ==
+             build_path_match("/foo/:id/:name/:category")
+
+    assert quote(@opts,
+             do: {[:username, :post_id, :comment_id], ["foo", username, post_id, comment_id]}
+           ) ==
+             build_path_match("foo/:username/:post_id/:comment_id")
+
+    assert quote(@opts, do: {[:username, :post1, :post2], ["foo", username, post1, post2]}) ==
+             build_path_match("foo/:username/:post1/:post2")
+  end
+
   test "build match with literal plus identifier" do
     assert quote(@opts, do: {[:id], ["foo", "bar-" <> id]}) == build_path_match("/foo/bar-:id")
 
@@ -50,9 +63,6 @@ defmodule Plug.Router.UtilsTest do
   test "build match only with glob" do
     assert quote(@opts, do: {[:bar], bar}) == build_path_match("*bar")
     assert quote(@opts, do: {[:glob], glob}) == build_path_match("/*glob")
-
-    assert quote(@opts, do: {[:bar], ["id-" <> _ | _] = bar}) == build_path_match("id-*bar")
-    assert quote(@opts, do: {[:glob], ["id-" <> _ | _] = glob}) == build_path_match("/id-*glob")
   end
 
   test "build match with glob" do
@@ -60,29 +70,33 @@ defmodule Plug.Router.UtilsTest do
     assert quote(@opts, do: {[:glob], ["foo" | glob]}) == build_path_match("foo/*glob")
   end
 
-  test "build match with literal plus glob" do
-    assert quote(@opts, do: {[:bar], ["foo" | ["id-" <> _ | _] = bar]}) ==
-             build_path_match("/foo/id-*bar")
-
-    assert quote(@opts, do: {[:glob], ["foo" | ["id-" <> _ | _] = glob]}) ==
-             build_path_match("foo/id-*glob")
-  end
-
   test "build invalid match with empty matches" do
     assert_raise Plug.Router.InvalidSpecError,
-                 ": in routes must be followed by lowercase letters or underscore",
+                 "invalid dynamic path. The characters : and * must be immediately followed by lowercase letters or underscore, got: :",
                  fn -> build_path_match("/foo/:") end
   end
 
   test "build invalid match with non word character" do
     assert_raise Plug.Router.InvalidSpecError,
-                 ":identifier in routes must be made of letters, numbers and underscores",
+                 "invalid dynamic path. Only letters, numbers, and underscore are allowed after : in \"/foo/:bar.baz\"",
                  fn -> build_path_match("/foo/:bar.baz") end
   end
 
   test "build invalid match with segments after glob" do
     assert_raise Plug.Router.InvalidSpecError,
-                 "cannot have a *glob followed by other segments",
+                 "globs (*var) must always be in the last path, got glob in: \"*bar\"",
                  fn -> build_path_match("/foo/*bar/baz") end
+  end
+
+  test "build invalid match with multiple identifiers" do
+    assert_raise Plug.Router.InvalidSpecError,
+                 "only one dynamic entry (:var or *glob) per path segment is allowed, got: \":bar.:baz\"",
+                 fn -> build_path_match("/foo/:bar.:baz") end
+  end
+
+  test "build invalid match with suffix glob" do
+    assert_raise Plug.Router.InvalidSpecError,
+                 "globs (*var) cannot be followed by suffixes, got: \"*bar-baz\"",
+                 fn -> build_path_match("/foo/*bar-baz") end
   end
 end
