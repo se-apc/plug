@@ -64,22 +64,26 @@ defmodule Plug.Conn.Utils do
 
   defp mt_first(<<?/, t::binary>>, acc) when acc != "", do: mt_wildcard(t, acc)
 
-  defp mt_first(<<h, t::binary>>, acc) when h in @upper,
-    do: mt_first(t, <<acc::binary, downcase_char(h)>>)
-
-  defp mt_first(<<h, t::binary>>, acc) when h in @lower or h in @alpha or h == ?-,
-    do: mt_first(t, <<acc::binary, h>>)
+  defp mt_first(<<h, t::binary>>, acc) do
+    cond do
+      h in @upper -> mt_first(t, <<acc::binary, downcase_char(h)>>)
+      h in @lower or h in @alpha or h == ?- -> mt_first(t, <<acc::binary, h>>)
+      true -> :error
+    end
+  end
 
   defp mt_first(_, _acc), do: :error
 
   defp mt_wildcard(<<?*, t::binary>>, first), do: mt_params(t, first, "*")
   defp mt_wildcard(t, first), do: mt_second(t, "", first)
 
-  defp mt_second(<<h, t::binary>>, acc, first) when h in @upper,
-    do: mt_second(t, <<acc::binary, downcase_char(h)>>, first)
-
-  defp mt_second(<<h, t::binary>>, acc, first) when h in @lower or h in @alpha or h in @other,
-    do: mt_second(t, <<acc::binary, h>>, first)
+  defp mt_second(<<h, t::binary>>, acc, first) do
+    cond do
+      h in @upper -> mt_second(t, <<acc::binary, downcase_char(h)>>, first)
+      h in @lower or h in @alpha or h in @other -> mt_second(t, <<acc::binary, h>>, first)
+      true -> mt_params(t, first, acc)
+    end
+  end
 
   defp mt_second(t, acc, first), do: mt_params(t, first, acc)
 
@@ -324,8 +328,13 @@ defmodule Plug.Conn.Utils do
     end
   end
 
-  defp downcase_char(char) when char in @upper, do: char + 32
-  defp downcase_char(char), do: char
+  defp downcase_char(char) do
+    if char in @upper do
+      char + 32
+    else
+      char
+    end
+  end
 
   defp split_semicolon(<<>>, <<>>, acc, _), do: acc
   defp split_semicolon(<<>>, buffer, acc, _), do: [buffer | acc]
