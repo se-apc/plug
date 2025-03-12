@@ -32,19 +32,16 @@ defmodule Plug.Conn do
   ## Fetchable fields
 
   Fetchable fields do not populate with request information until the corresponding
-  prefixed 'fetch_' function retrieves them, e.g., the `fetch_cookies/2` function
-  retrieves the `cookies` field.
+  prefixed 'fetch_' function retrieves them, e.g., the `fetch_query_params/2` function
+  retrieves the `query_params` field.
 
   If you access these fields before fetching them, they will be returned as
   `Plug.Conn.Unfetched` structs.
 
-    * `cookies`- the request cookies with the response cookies
     * `body_params` - the request body params, populated through a `Plug.Parsers` parser.
     * `query_params` - the request query params, populated through `fetch_query_params/2`
-    * `path_params` - the request path params, populated by routers such as `Plug.Router`
-    * `params` - the request params, the result of merging the `:path_params` on top of
-       `:body_params` on top of `:query_params`
-    * `req_cookies` - the request cookies (without the response ones)
+    * `params` - the request params, the result of merging `:body_params` on top of
+      `:query_params` alongsaide any further changes (such as the ones done by `Plug.Router`)
 
   ## Session vs Assigns
 
@@ -68,15 +65,13 @@ defmodule Plug.Conn do
   More can be stored in a session cookie, but be careful: this makes requests
   and responses heavier, and clients may reject cookies beyond a certain size.
   Also, session cookie are not shared between a user's different browsers or devices.
-
-  If the session is stored elsewhere, such as with `Plug.Session.ETS`, session
-  data lookup still needs a key, e.g., a user's id. Unlike session data, `assigns`
-  data fields only last a single request.
+  If the session is stored elsewhere, such as a database, the browser only has to
+  store the session key and therefore more data can be stored in the session.
 
   A typical use case would be for an authentication plug to look up a user by id
-  and keep the state of the user's credentials by storing them in `assigns`.
-  Other plugs will then also have access through the `assigns` storage. This is
-  an important point because the session data disappears on the next request.
+  and keep the user information stored in `assigns`. Other plugs will then also
+  have access to it via `assigns`. This is an important point because the assign
+  data disappears on the next request.
 
   To summarize: `assigns` is for storing data to be accessed during the current
   request, and the session is for storing data to be accessed in subsequent
@@ -118,6 +113,17 @@ defmodule Plug.Conn do
 
     * `adapter` - holds the adapter information in a tuple
     * `private` - shared library data as a map
+
+  ## Deprecated fields
+
+    * `path_params` - the request path params, populated by routers such as `Plug.Router`.
+      Use `conn.params` instead.
+    * `req_cookies` - the decoded request cookies (without decrypting or verifying them).
+      Use `get_req_header/2` or `get_cookies/1` instead.
+    * `cookies`- the request cookies with the response cookies.
+      Use `get_cookies/1` instead.
+    * `resp_cookies`- the request cookies with the response cookies.
+      Use `get_resp_cookies/1` instead.
 
   ## Custom status codes
 
@@ -1542,6 +1548,30 @@ defmodule Plug.Conn do
         acc
       end
     end)
+  end
+
+  @doc """
+  Returns a map with both request and response cookies.
+
+  Raises if cookies have not been fetched.
+  """
+  @spec get_cookies(t) :: %{optional(binary) => term}
+  def get_cookies(conn) do
+    case conn.cookies do
+      %Unfetched{} -> raise ArgumentError, "cookies not fetched, call fetch_cookies/2"
+      %{} = cookies -> cookies
+    end
+  end
+
+  @doc """
+  Returns a map with response cookies.
+
+  Each response cookie is represented as a map with the
+  metadata to be sent as part of the response.
+  """
+  @spec get_resp_cookies(t) :: %{optional(binary) => map}
+  def get_resp_cookies(conn) do
+    conn.resp_cookies
   end
 
   @doc """

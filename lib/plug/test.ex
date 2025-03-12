@@ -5,7 +5,8 @@ defmodule Plug.Test do
   This module can be used in your test cases, like this:
 
       use ExUnit.Case, async: true
-      use Plug.Test
+      import Plug.Test
+      import Plug.Conn
 
   Using this module will:
 
@@ -22,6 +23,9 @@ defmodule Plug.Test do
   """
 
   @doc false
+  @deprecated """
+  Please use `import Plug.Test` and `import Plug.Conn` directly instead.
+  """
   defmacro __using__(_) do
     quote do
       import Plug.Test
@@ -241,7 +245,7 @@ defmodule Plug.Test do
     req_cookies = Plug.Conn.fetch_cookies(old_conn).req_cookies
 
     resp_cookies =
-      Enum.reduce(old_conn.resp_cookies, req_cookies, fn {key, opts}, acc ->
+      Enum.reduce(Plug.Conn.get_resp_cookies(old_conn), req_cookies, fn {key, opts}, acc ->
         if value = Map.get(opts, :value) do
           Map.put(acc, key, value)
         else
