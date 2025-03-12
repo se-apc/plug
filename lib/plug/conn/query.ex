@@ -150,7 +150,7 @@ defmodule Plug.Conn.Query do
       URI.decode_www_form(value)
     rescue
       ArgumentError ->
-        Logger.error("Exception! invalid urlencoded params, got #{inspect value}")
+        Logger.error("Exception! invalid urlencoded params, got #{inspect(value)}")
         ""
     else
       binary ->
